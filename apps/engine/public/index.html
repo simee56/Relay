@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Relay voice test</title>
+</head>
+<body style="font-family: sans-serif; max-width: 600px; margin: 40px auto;">
+  <h1>Relay voice test</h1>
+  <button id="talk" style="font-size: 20px; padding: 16px 32px;">Hold to talk</button>
+  <p id="status">Connecting...</p>
+  <pre id="log"></pre>
+
+  <script>
+    const talkBtn = document.getElementById("talk");
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    const log = (line) => { logEl.textContent += line + "\n"; };
+
+    const ws = new WebSocket(`ws://${location.host}`);
+    ws.onopen = () => { statusEl.textContent = "Connected. Hold the button and speak."; };
+    ws.onclose = () => { statusEl.textContent = "Disconnected."; };
+
+    let releasedAt = 0;
+    let currentAudio = null;
+
+    function stopPlayback() {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+    }
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "transcript") log("You: " + msg.text);
+        if (msg.type === "reply") log("Relay: " + msg.text);
+        if (msg.type === "error") {
+          log("Error: " + msg.message);
+          statusEl.textContent = "Ready.";
+        }
+      } else {
+        log(`(heard the answer ${Date.now() - releasedAt} ms after you let go)`);
+        statusEl.textContent = "Ready.";
+        const url = URL.createObjectURL(new Blob([event.data], { type: "audio/wav" }));
+        currentAudio = new Audio(url);
+        currentAudio.play();
+      }
+    };
+
+    let stream, recorder, chunks = [], holding = false;
+
+    async function startTalking() {
+      holding = true;
+
+      // Interrupt: stop any sound and tell the server to drop the old answer
+      stopPlayback();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "interrupt" }));
+      }
+
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      if (!holding) return;
+
+      chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: recorder.mimeType });
+        if (blob.size < 1500) {
+          statusEl.textContent = "Too short, try again.";
+          return;
+        }
+        releasedAt = Date.now();
+        statusEl.textContent = "Thinking...";
+        ws.send(await blob.arrayBuffer());
+      };
+      recorder.start();
+      statusEl.textContent = "Listening...";
+    }
+
+    function stopTalking() {
+      holding = false;
+      if (recorder && recorder.state === "recording") recorder.stop();
+    }
+
+    talkBtn.addEventListener("pointerdown", startTalking);
+    talkBtn.addEventListener("pointerup", stopTalking);
+    talkBtn.addEventListener("pointerleave", stopTalking);
+  </script>
+</body>
+</html>

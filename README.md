@@ -104,11 +104,3 @@ Setup instructions will be added once the first milestone is working.
 ## Contributing
 
 This is a personal learning and portfolio project. Issues and suggestions are welcome.
-
-## License
-
-MIT (to be added)
-
----
-
-Built by **[Your Name]** · [GitHub](https://github.com/your-username) · [LinkedIn](https://linkedin.com/in/your-profile)

@@ -1,21 +1,24 @@
 import "dotenv/config";
+import { SentenceSplitter } from "./sentences";
 
 const apiKey = process.env.GROQ_API_KEY;
 const model = process.env.GROQ_MODEL;
 
-if(!apiKey) {
+if (!apiKey) {
     throw new Error("GROQ_API_KEY is missing. Add it to your .env file.");
 }
 
 const API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const SYSTEM_PROMPT =
-  "You are a friendly phone receptionist for Ravi's Pizza Shop. " +
-  "Open 11 AM to 10 PM. Menu: veg pizza, paneer pizza, garlic bread. " +
-  "Reply in at most two short sentences, like you are speaking on the phone.";
+    "You are a friendly phone receptionist for Ravi's Pizza Shop. " +
+    "Open 11 AM to 10 PM. Menu: veg pizza, paneer pizza, garlic bread. " +
+    "You are speaking on a phone call, so reply in one or two short sentences, " +
+    "under 30 words in total. Use plain spoken words only: no lists, no emojis, no markdown. " +
+    "If you are not sure about something, say so and offer to take a message instead of guessing.";
 
 type ChatResponse = {
-    choices: {message: {content: string }} [];
+    choices: { message: { content: string } }[];
 }
 
 function buildBody(userText: string, stream: boolean) {
@@ -24,7 +27,7 @@ function buildBody(userText: string, stream: boolean) {
         stream,
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userText}
+            { role: "user", content: userText }
         ],
     });
 }
@@ -35,7 +38,7 @@ const headers = {
 };
 
 // Wait for the full answer
-export async function askBrain(userText: string):  Promise<string> {
+export async function askBrain(userText: string): Promise<string> {
     const start = Date.now();
 
     const response = await fetch(API_URL, {
@@ -44,7 +47,7 @@ export async function askBrain(userText: string):  Promise<string> {
         body: buildBody(userText, false),
     });
 
-    if(!response.ok) {
+    if (!response.ok) {
         throw new Error(`Groq error ${response.status}: ${await response.text()}`);
     }
 
@@ -65,7 +68,7 @@ export async function askBrainStreaming(
         body: buildBody(userText, true),
     });
 
-    if(!response.ok || !response.body) {
+    if (!response.ok || !response.body) {
         throw new Error(`Groq error ${response.status}: ${await response.text()}`);
     }
 
@@ -102,5 +105,24 @@ export async function askBrainStreaming(
     }
 
     console.log(`\n[stream] full answer took ${Date.now() - start} ms`);
+    return fullText;
+}
+
+// Streams the reply and calls onSentence for each complete sentence.
+export async function askBrainBySentence(
+    userText: string,
+    onSentence: (sentence: string) => void
+): Promise<string> {
+    const splitter = new SentenceSplitter();
+
+    const fullText = await askBrainStreaming(userText, (token) => {
+        for (const sentence of splitter.push(token)) {
+            onSentence(sentence);
+        }
+    });
+
+    const rest = splitter.flush();
+    if (rest) onSentence(rest);
+
     return fullText;
 }

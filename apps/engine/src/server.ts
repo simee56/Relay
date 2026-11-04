@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { listen } from "./ear";
-import { askBrainStreaming } from "./brain";
+import { askBrainBySentence } from "./brain";
 import { speak } from "./mouth";
 
 const PORT = 3000;
@@ -27,14 +27,13 @@ function sendJson(ws: WebSocket, payload: object) {
 
 wss.on("connection", (ws) => {
   console.log("[ws] client connected");
-  let currentTurn = 0; // counts conversation turns on this connection
+  let currentTurn = 0;
 
   ws.on("message", async (data, isBinary) => {
-    // Text message: control signals from the browser
     if (!isBinary) {
       const msg = JSON.parse(data.toString());
       if (msg.type === "interrupt") {
-        currentTurn++; // makes any in-progress turn "old"
+        currentTurn++;
         console.log("[ws] interrupted");
       }
       return;
@@ -43,24 +42,57 @@ wss.on("connection", (ws) => {
     // Binary message: the user's recorded speech
     const myTurn = ++currentTurn;
     const isStale = () => myTurn !== currentTurn;
+    const turnStart = Date.now();
+
+    let sentenceIndex = 0;
+    let firstAudioSent = false;
+    let sendChain: Promise<void> = Promise.resolve();
+
+    // Called once for every complete sentence from the Brain
+    function enqueueSentence(sentence: string) {
+      if (isStale()) return;
+      const myIndex = sentenceIndex++;
+
+      const job = speak(sentence);
+      job.catch(() => { });
+
+      // The chain makes sure clips are SENT in order
+      sendChain = sendChain.then(async () => {
+        try {
+          const audio = await job;
+          if (isStale()) return;
+          sendJson(ws, { type: "audio", turn: myTurn, index: myIndex, text: sentence });
+          ws.send(audio, { binary: true });
+
+          if (!firstAudioSent) {
+            firstAudioSent = true;
+            console.log(
+              `[turn ${myTurn}] first audio sent ${Date.now() - turnStart} ms after speech arrived`
+            );
+          }
+        } catch (err) {
+          console.error("[mouth] failed for sentence:", sentence, err);
+        }
+      });
+    }
 
     try {
       const heard = await listen(data as Buffer, "speech.webm");
       if (isStale()) return;
-      sendJson(ws, { type: "transcript", text: heard });
+      sendJson(ws, { type: "transcript", text: heard, turn: myTurn });
 
-      if (!heard) {
-        sendJson(ws, { type: "error", message: "I did not catch that." });
+      const hasRealWords = /[\p{L}\p{N}]/u.test(heard);
+      if (!hasRealWords) {
+        sendJson(ws, {
+          type: "error",
+          message: "I did not catch that. Hold the button while you speak.",
+        });
         return;
       }
 
-      const reply = await askBrainStreaming(heard, () => {});
+      const reply = await askBrainBySentence(heard, enqueueSentence);
       if (isStale()) return;
       sendJson(ws, { type: "reply", text: reply });
-
-      const audioOut = await speak(reply);
-      if (isStale()) return;
-      ws.send(audioOut, { binary: true });
     } catch (err) {
       console.error(err);
       sendJson(ws, { type: "error", message: "Something went wrong. Check the terminal." });

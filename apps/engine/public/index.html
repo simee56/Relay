@@ -21,40 +21,87 @@
     ws.onclose = () => { statusEl.textContent = "Disconnected."; };
 
     let releasedAt = 0;
+    let activeTurn = null;
+    let nextMeta = null;
+    let firstAudioLogged = false;
+
+    // ---- Audio queue ----
+    const queue = [];
     let currentAudio = null;
 
+    function playNext() {
+      if (currentAudio || queue.length === 0) return;
+      const url = queue.shift();
+      currentAudio = new Audio(url);
+      currentAudio.onerror = () => log("[debug] audio element error (browser could not decode the clip)");
+      currentAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        if (queue.length === 0) statusEl.textContent = "Ready.";
+        playNext();
+      };
+      currentAudio.play().then(
+        () => log("[debug] play() started"),
+        (err) => log("[debug] play() FAILED: " + err.name + " - " + err.message)
+      );
+    }
+
     function stopPlayback() {
+      queue.length = 0;
       if (currentAudio) {
+        currentAudio.onended = null;
         currentAudio.pause();
         currentAudio = null;
       }
     }
 
+    // ---- Messages from the server ----
     ws.onmessage = (event) => {
       if (typeof event.data === "string") {
         const msg = JSON.parse(event.data);
-        if (msg.type === "transcript") log("You: " + msg.text);
+        log("[debug] got text message: " + msg.type);
+        if (msg.type === "transcript") {
+          activeTurn = msg.turn;
+          log("You: " + msg.text);
+        }
+        if (msg.type === "audio") nextMeta = msg;
         if (msg.type === "reply") log("Relay: " + msg.text);
         if (msg.type === "error") {
           log("Error: " + msg.message);
           statusEl.textContent = "Ready.";
         }
-      } else {
-        log(`(heard the answer ${Date.now() - releasedAt} ms after you let go)`);
-        statusEl.textContent = "Ready.";
-        const url = URL.createObjectURL(new Blob([event.data], { type: "audio/wav" }));
-        currentAudio = new Audio(url);
-        currentAudio.play();
+        return;
       }
+
+      const size = event.data.size ?? event.data.byteLength;
+      log("[debug] got audio bytes: " + size);
+
+      const meta = nextMeta;
+      nextMeta = null;
+      if (!meta || meta.turn !== activeTurn) {
+        log("[debug] DROPPED clip. meta=" + JSON.stringify(meta) + " activeTurn=" + activeTurn);
+        return;
+      }
+
+      if (!firstAudioLogged) {
+        firstAudioLogged = true;
+        log(`(first sound ${Date.now() - releasedAt} ms after you let go)`);
+        statusEl.textContent = "Speaking...";
+      }
+      const url = URL.createObjectURL(new Blob([event.data], { type: "audio/wav" }));
+      queue.push(url);
+      playNext();
     };
 
+    // ---- Microphone, push to talk ----
     let stream, recorder, chunks = [], holding = false;
 
     async function startTalking() {
       holding = true;
 
-      // Interrupt: stop any sound and tell the server to drop the old answer
       stopPlayback();
+      activeTurn = null;
+      nextMeta = null;
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "interrupt" }));
       }
@@ -74,8 +121,15 @@
           return;
         }
         releasedAt = Date.now();
+        firstAudioLogged = false;
         statusEl.textContent = "Thinking...";
         ws.send(await blob.arrayBuffer());
+
+        setTimeout(() => {
+          if (!firstAudioLogged && statusEl.textContent === "Thinking...") {
+            log("[debug] 10 s passed and no audio clip was accepted");
+          }
+        }, 10000);
       };
       recorder.start();
       statusEl.textContent = "Listening...";

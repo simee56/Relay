@@ -10,7 +10,7 @@ if (!apiKey) {
   throw new Error("GROQ_API_KEY is missing. Add it to your .env file.");
 }
 
-export async function speak(text: string): Promise<Buffer> {
+export async function speak(text: string, signal?: AbortSignal): Promise<Buffer> {
   const start = Date.now();
 
   const response = await apiFetch("https://api.groq.com/openai/v1/audio/speech", {
@@ -25,6 +25,7 @@ export async function speak(text: string): Promise<Buffer> {
       input: text,
       response_format: "wav",
     }),
+    signal,
   });
 
   if (!response.ok) {

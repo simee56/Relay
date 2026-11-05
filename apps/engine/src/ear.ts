@@ -8,7 +8,7 @@ if (!apiKey) {
   throw new Error("GROQ_API_KEY is missing. Add it to your .env file.");
 }
 
-export async function listen(audio: Buffer, filename = "audio.wav"): Promise<string> {
+export async function listen(audio: Buffer, filename = "audio.wav", signal?: AbortSignal): Promise<string> {
   const start = Date.now();
 
   const form = new FormData();
@@ -21,6 +21,7 @@ export async function listen(audio: Buffer, filename = "audio.wav"): Promise<str
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    signal,
   });
 
   if (!response.ok) {

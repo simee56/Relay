@@ -22,7 +22,9 @@ type ChatResponse = {
     choices: { message: { content: string } }[];
 }
 
-function buildBody(userText: string, stream: boolean) {
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+function buildBody(history: ChatMessage[], userText: string, stream: boolean) {
     const effort = process.env.GROQ_REASONING_EFFORT;
     return JSON.stringify({
         model,
@@ -30,7 +32,8 @@ function buildBody(userText: string, stream: boolean) {
         ...(effort ? { reasoning_effort: effort } : {}),
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userText }
+            ...history,
+            { role: "user", content: userText },
         ],
     });
 }
@@ -47,7 +50,7 @@ export async function askBrain(userText: string): Promise<string> {
     const response = await apiFetch(API_URL, {
         method: "Post",
         headers,
-        body: buildBody(userText, false),
+        body: buildBody([], userText, false), 
     });
 
     if (!response.ok) {
@@ -62,13 +65,16 @@ export async function askBrain(userText: string): Promise<string> {
 // Get the answer piece by piece
 export async function askBrainStreaming(
     userText: string,
-    onToken: (token: string) => void
+    onToken: (token: string) => void,
+    history: ChatMessage[] = [] ,
+    signal?: AbortSignal, 
 ): Promise<string> {
     const start = Date.now();
     const response = await apiFetch(API_URL, {
         method: "POST",
         headers,
-        body: buildBody(userText, true),
+        body: buildBody(history, userText, true),
+        signal, 
     });
 
     if (!response.ok || !response.body) {
@@ -114,7 +120,9 @@ export async function askBrainStreaming(
 // Streams the reply and calls onSentence for each complete sentence.
 export async function askBrainBySentence(
     userText: string,
-    onSentence: (sentence: string) => void
+    onSentence: (sentence: string) => void,
+    history: ChatMessage[] = [],
+    signal?: AbortSignal,  
 ): Promise<string> {
     const splitter = new SentenceSplitter();
 
@@ -122,7 +130,10 @@ export async function askBrainBySentence(
         for (const sentence of splitter.push(token)) {
             onSentence(sentence);
         }
-    });
+    },
+        history,
+        signal,
+    );
 
     const rest = splitter.flush();
     if (rest) onSentence(rest);

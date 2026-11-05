@@ -5,6 +5,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { listen } from "./ear";
 import { askBrainBySentence } from "./brain";
 import { speak } from "./mouth";
+import { TurnTrace } from "./trace"; 
+import { warmUp } from "./http";
 
 const PORT = 3000;
 
@@ -27,6 +29,7 @@ function sendJson(ws: WebSocket, payload: object) {
 
 wss.on("connection", (ws) => {
   console.log("[ws] client connected");
+  void warmUp();    
   let currentTurn = 0;
 
   ws.on("message", async (data, isBinary) => {
@@ -35,6 +38,7 @@ wss.on("connection", (ws) => {
       if (msg.type === "interrupt") {
         currentTurn++;
         console.log("[ws] interrupted");
+        void warmUp();    
       }
       return;
     }
@@ -42,8 +46,7 @@ wss.on("connection", (ws) => {
     // Binary message: the user's recorded speech
     const myTurn = ++currentTurn;
     const isStale = () => myTurn !== currentTurn;
-    const turnStart = Date.now();
-
+    const trace = new TurnTrace(myTurn); 
     let sentenceIndex = 0;
     let firstAudioSent = false;
     let sendChain: Promise<void> = Promise.resolve();
@@ -51,12 +54,12 @@ wss.on("connection", (ws) => {
     // Called once for every complete sentence from the Brain
     function enqueueSentence(sentence: string) {
       if (isStale()) return;
+      trace.mark("firstSentence"); // TRACE (only the first call counts)
       const myIndex = sentenceIndex++;
 
       const job = speak(sentence);
-      job.catch(() => { });
+      job.catch(() => {});
 
-      // The chain makes sure clips are SENT in order
       sendChain = sendChain.then(async () => {
         try {
           const audio = await job;
@@ -66,18 +69,21 @@ wss.on("connection", (ws) => {
 
           if (!firstAudioSent) {
             firstAudioSent = true;
-            console.log(
-              `[turn ${myTurn}] first audio sent ${Date.now() - turnStart} ms after speech arrived`
-            );
+            trace.mark("firstAudioSent"); // TRACE
+            trace.finish(); // TRACE
           }
         } catch (err) {
           console.error("[mouth] failed for sentence:", sentence, err);
+          if (!isStale()) {
+            sendJson(ws, { type: "error", message: "The voice failed for part of the reply." });
+          }
         }
       });
     }
 
     try {
       const heard = await listen(data as Buffer, "speech.webm");
+      trace.mark("earDone"); // TRACE
       if (isStale()) return;
       sendJson(ws, { type: "transcript", text: heard, turn: myTurn });
 

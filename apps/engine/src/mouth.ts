@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { apiFetch } from "./http";
 import { mkdir, writeFile } from "node:fs/promises";
 
 const apiKey = process.env.GROQ_API_KEY;
@@ -12,7 +13,7 @@ if (!apiKey) {
 export async function speak(text: string): Promise<Buffer> {
   const start = Date.now();
 
-  const response = await fetch("https://api.groq.com/openai/v1/audio/speech", {
+  const response = await apiFetch("https://api.groq.com/openai/v1/audio/speech", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

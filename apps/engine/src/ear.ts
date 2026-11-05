@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { apiFetch, FormData } from "./http";
 
 const apiKey = process.env.GROQ_API_KEY;
 const sttModel = process.env.GROQ_STT_MODEL ?? "whisper-large-v3-turbo";
@@ -16,9 +17,9 @@ export async function listen(audio: Buffer, filename = "audio.wav"): Promise<str
   form.append("response_format", "text");
   form.append("language", "en");
 
-  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+  const response = await apiFetch("https://api.groq.com/openai/v1/audio/transcriptions", {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` }, 
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
 
@@ -27,6 +28,5 @@ export async function listen(audio: Buffer, filename = "audio.wav"): Promise<str
   }
 
   const text = (await response.text()).trim();
-  console.log(`[ear] transcribed in ${Date.now() - start} ms`);
-  return text;
+  console.log(`[ear] transcribed in ${Date.now() - start} ms (${audio.length} bytes)`); return text;
 }

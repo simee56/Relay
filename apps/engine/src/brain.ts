@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { apiFetch } from "./http";
 import { SentenceSplitter } from "./sentences";
 
 const apiKey = process.env.GROQ_API_KEY;
@@ -22,9 +23,11 @@ type ChatResponse = {
 }
 
 function buildBody(userText: string, stream: boolean) {
+    const effort = process.env.GROQ_REASONING_EFFORT;
     return JSON.stringify({
         model,
         stream,
+        ...(effort ? { reasoning_effort: effort } : {}),
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userText }
@@ -41,7 +44,7 @@ const headers = {
 export async function askBrain(userText: string): Promise<string> {
     const start = Date.now();
 
-    const response = await fetch(API_URL, {
+    const response = await apiFetch(API_URL, {
         method: "Post",
         headers,
         body: buildBody(userText, false),
@@ -62,7 +65,7 @@ export async function askBrainStreaming(
     onToken: (token: string) => void
 ): Promise<string> {
     const start = Date.now();
-    const response = await fetch(API_URL, {
+    const response = await apiFetch(API_URL, {
         method: "POST",
         headers,
         body: buildBody(userText, true),

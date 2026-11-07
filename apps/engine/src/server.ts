@@ -7,10 +7,12 @@ import { askBrainBySentence, type ChatMessage } from "./brain";
 import { speak } from "./mouth";
 import { TurnTrace } from "./trace";
 import { warmUp } from "./http";
+import { getDefaultAgent } from "./db"; // NEW
 
 const PORT = 3000;
 const MAX_HISTORY_MESSAGES = 12;
 
+// A cancelled request throws an "AbortError". That is not a real failure.
 function isAbortError(err: unknown): boolean {
   const e = err as { name?: string; cause?: { name?: string } } | null;
   return e?.name === "AbortError" || e?.cause?.name === "AbortError";
@@ -40,6 +42,14 @@ wss.on("connection", (ws) => {
   const history: ChatMessage[] = [];
   let currentController: AbortController | null = null;
 
+  const agentPromise = getDefaultAgent().catch((err) => {
+    console.error("[db] could not load the agent:", err);
+    return null;
+  });
+  void agentPromise.then((agent) => {
+    if (agent) console.log(`[agent] loaded "${agent.name}" for ${agent.tenantName}`);
+  });
+
   ws.on("message", async (data, isBinary) => {
     if (!isBinary) {
       const msg = JSON.parse(data.toString());
@@ -61,6 +71,14 @@ wss.on("connection", (ws) => {
     const controller = new AbortController();
     currentController = controller;
     const signal = controller.signal;
+
+    const agent = await agentPromise;
+    if (!agent) {
+      sendJson(ws, { type: "error", message: "No agent is available. Check the database." });
+      return;
+    }
+    const agentVoice = agent.voice;
+
     let sentenceIndex = 0;
     let firstAudioSent = false;
     let sendChain: Promise<void> = Promise.resolve();
@@ -71,7 +89,7 @@ wss.on("connection", (ws) => {
       trace.mark("firstSentence");
       const myIndex = sentenceIndex++;
 
-      const job = speak(sentence, signal);
+      const job = speak(sentence, { voice: agentVoice, signal });
       job.catch(() => { });
 
       // The chain makes sure clips are SENT in order
@@ -88,7 +106,6 @@ wss.on("connection", (ws) => {
             trace.finish();
           }
         } catch (err) {
-          console.error("[mouth] failed for sentence:", sentence, err);
           if (isAbortError(err)) {
             console.log(`[cancel] turn ${myTurn}: voice request stopped`);
             return;
@@ -101,7 +118,7 @@ wss.on("connection", (ws) => {
     }
 
     try {
-      const heard = await listen(data as Buffer, "speech.webm", signal); 
+      const heard = await listen(data as Buffer, "speech.webm", signal);
       trace.mark("earDone");
       if (isStale()) return;
       sendJson(ws, { type: "transcript", text: heard, turn: myTurn });
@@ -115,7 +132,12 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      const reply = await askBrainBySentence(heard, enqueueSentence, [...history], signal);
+      // The agent's own instructions go to the Brain, together with the history and the cancel wire
+      const reply = await askBrainBySentence(heard, enqueueSentence, {
+        systemPrompt: agent.systemPrompt,
+        history: [...history],
+        signal,
+      });
       if (isStale()) return;
       sendJson(ws, { type: "reply", text: reply });
 
@@ -136,7 +158,7 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     currentController?.abort();
-    console.log("[ws] client disconnected")
+    console.log("[ws] client disconnected");
   });
 });
 

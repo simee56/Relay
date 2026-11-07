@@ -1,16 +1,22 @@
 import "dotenv/config";
-import { apiFetch } from "./http";
 import { mkdir, writeFile } from "node:fs/promises";
+import { apiFetch } from "./http";
 
 const apiKey = process.env.GROQ_API_KEY;
 const ttsModel = process.env.GROQ_TTS_MODEL ?? "canopylabs/orpheus-v1-english";
-const ttsVoice = process.env.GROQ_TTS_VOICE ?? "hannah";
+const defaultVoice = process.env.GROQ_TTS_VOICE ?? "hannah";
 
 if (!apiKey) {
   throw new Error("GROQ_API_KEY is missing. Add it to your .env file.");
 }
 
-export async function speak(text: string, signal?: AbortSignal): Promise<Buffer> {
+export type SpeakOptions = {
+  voice?: string;
+  signal?: AbortSignal;
+};
+
+export async function speak(text: string, options: SpeakOptions = {}): Promise<Buffer> {
+  const { voice = defaultVoice, signal } = options;
   const start = Date.now();
 
   const response = await apiFetch("https://api.groq.com/openai/v1/audio/speech", {
@@ -21,7 +27,7 @@ export async function speak(text: string, signal?: AbortSignal): Promise<Buffer>
     },
     body: JSON.stringify({
       model: ttsModel,
-      voice: ttsVoice,
+      voice,
       input: text,
       response_format: "wav",
     }),

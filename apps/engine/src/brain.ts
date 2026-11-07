@@ -3,7 +3,7 @@ import { apiFetch } from "./http";
 import { SentenceSplitter } from "./sentences";
 
 const apiKey = process.env.GROQ_API_KEY;
-const model = process.env.GROQ_MODEL;
+const model = process.env.GROQ_MODEL ?? "openai/gpt-oss-20b";
 
 if (!apiKey) {
     throw new Error("GROQ_API_KEY is missing. Add it to your .env file.");
@@ -11,27 +11,25 @@ if (!apiKey) {
 
 const API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-const SYSTEM_PROMPT =
-    "You are a friendly phone receptionist for Ravi's Pizza Shop. " +
-    "Open 11 AM to 10 PM. Menu: veg pizza, paneer pizza, garlic bread. " +
-    "You are speaking on a phone call, so reply in one or two short sentences, " +
-    "under 30 words in total. Use plain spoken words only: no lists, no emojis, no markdown. " +
-    "If you are not sure about something, say so and offer to take a message instead of guessing.";
-
-type ChatResponse = {
-    choices: { message: { content: string } }[];
-}
+const FALLBACK_SYSTEM_PROMPT =
+    "You are a friendly phone receptionist. Reply in one or two short sentences, in plain spoken words.";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
-function buildBody(history: ChatMessage[], userText: string, stream: boolean) {
+export type BrainOptions = {
+    systemPrompt?: string;
+    history?: ChatMessage[];
+    signal?: AbortSignal;
+};
+
+function buildBody(systemPrompt: string, history: ChatMessage[], userText: string) {
     const effort = process.env.GROQ_REASONING_EFFORT;
     return JSON.stringify({
         model,
-        stream,
+        stream: true,
         ...(effort ? { reasoning_effort: effort } : {}),
         messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: systemPrompt },
             ...history,
             { role: "user", content: userText },
         ],
@@ -40,43 +38,24 @@ function buildBody(history: ChatMessage[], userText: string, stream: boolean) {
 
 const headers = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${apiKey}`
+    Authorization: `Bearer ${apiKey}`,
 };
 
-// Wait for the full answer
-export async function askBrain(userText: string): Promise<string> {
-    const start = Date.now();
-
-    const response = await apiFetch(API_URL, {
-        method: "Post",
-        headers,
-        body: buildBody([], userText, false), 
-    });
-
-    if (!response.ok) {
-        throw new Error(`Groq error ${response.status}: ${await response.text()}`);
-    }
-
-    const data = (await response.json()) as ChatResponse;
-    console.log(`[normal] full answer took ${Date.now() - start} ms`);
-    return data.choices[0].message.content;
-}
-
-// Get the answer piece by piece
+// Streaming: get the answer piece by piece
 export async function askBrainStreaming(
     userText: string,
     onToken: (token: string) => void,
-    history: ChatMessage[] = [] ,
-    signal?: AbortSignal, 
+    options: BrainOptions = {}
 ): Promise<string> {
+    const { systemPrompt = FALLBACK_SYSTEM_PROMPT, history = [], signal } = options;
     const start = Date.now();
+
     const response = await apiFetch(API_URL, {
         method: "POST",
         headers,
-        body: buildBody(history, userText, true),
-        signal, 
+        body: buildBody(systemPrompt, history, userText),
+        signal,
     });
-
     if (!response.ok || !response.body) {
         throw new Error(`Groq error ${response.status}: ${await response.text()}`);
     }
@@ -93,7 +72,7 @@ export async function askBrainStreaming(
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop() ?? ""; // keep the unfinished last line for next round
+        buffer = lines.pop() ?? "";
 
         for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
@@ -117,22 +96,22 @@ export async function askBrainStreaming(
     return fullText;
 }
 
-// Streams the reply and calls onSentence for each complete sentence.
+// Streams the reply and calls onSentence for each complete sentence
 export async function askBrainBySentence(
     userText: string,
     onSentence: (sentence: string) => void,
-    history: ChatMessage[] = [],
-    signal?: AbortSignal,  
+    options: BrainOptions = {}
 ): Promise<string> {
     const splitter = new SentenceSplitter();
 
-    const fullText = await askBrainStreaming(userText, (token) => {
-        for (const sentence of splitter.push(token)) {
-            onSentence(sentence);
-        }
-    },
-        history,
-        signal,
+    const fullText = await askBrainStreaming(
+        userText,
+        (token) => {
+            for (const sentence of splitter.push(token)) {
+                onSentence(sentence);
+            }
+        },
+        options
     );
 
     const rest = splitter.flush();

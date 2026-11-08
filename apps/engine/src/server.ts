@@ -7,7 +7,7 @@ import { askBrainBySentence, type ChatMessage } from "./brain";
 import { speak } from "./mouth";
 import { TurnTrace } from "./trace";
 import { warmUp } from "./http";
-import { getDefaultAgent } from "./db"; // NEW
+import { getDefaultAgent, getAgentById } from "./db";
 
 const PORT = 3000;
 const MAX_HISTORY_MESSAGES = 12;
@@ -19,7 +19,8 @@ function isAbortError(err: unknown): boolean {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.url === "/" || req.url === "/index.html") {
+  const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+  if (pathname === "/" || pathname === "/index.html") {
     const html = await readFile(path.join(process.cwd(), "public", "index.html"));
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
@@ -35,14 +36,18 @@ function sendJson(ws: WebSocket, payload: object) {
   ws.send(JSON.stringify(payload));
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   console.log("[ws] client connected");
   void warmUp();
   let currentTurn = 0;
   const history: ChatMessage[] = [];
   let currentController: AbortController | null = null;
 
-  const agentPromise = getDefaultAgent().catch((err) => {
+  const requestedAgentId = new URL(req.url ?? "/", "http://localhost").searchParams.get("agent");
+
+  const agentPromise = (
+    requestedAgentId ? getAgentById(requestedAgentId) : getDefaultAgent()
+  ).catch((err) => {
     console.error("[db] could not load the agent:", err);
     return null;
   });

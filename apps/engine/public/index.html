@@ -16,7 +16,7 @@
     const logEl = document.getElementById("log");
     const log = (line) => { logEl.textContent += line + "\n"; };
 
-    const ws = new WebSocket(`ws://${location.host}`);
+    const ws = new WebSocket(`ws://${location.host}/${location.search}`);
     ws.onopen = () => { statusEl.textContent = "Connected. Hold the button and speak."; };
     ws.onclose = () => { statusEl.textContent = "Disconnected."; };
 

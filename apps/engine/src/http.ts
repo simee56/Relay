@@ -6,6 +6,7 @@ import { Agent, fetch as undiciFetch, FormData } from "undici";
 const agent = new Agent({
   keepAliveTimeout: 60_000,
   keepAliveMaxTimeout: 600_000,
+  connect: { family: 4 },
 });
 
 export function apiFetch(
@@ -21,7 +22,7 @@ export async function warmUp(): Promise<void> {
     const res = await apiFetch("https://api.groq.com/openai/v1/models", {
       headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     });
-    await res.arrayBuffer(); 
+    await res.arrayBuffer();
     console.log(`[warmup] connection ready in ${Date.now() - t0} ms`);
   } catch (err) {
     console.log("[warmup] failed (not a problem):", err);

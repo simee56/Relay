@@ -6,7 +6,7 @@ import { listen } from "./ear";
 import { askBrainBySentence, type ChatMessage } from "./brain";
 import { speak } from "./mouth";
 import { TurnTrace } from "./trace";
-import { warmUp } from "./http";
+import { warmUp, isNetworkError, networkErrorCode } from "./http";
 import { getDefaultAgent, getAgentById } from "./db";
 
 const PORT = 3000;
@@ -116,6 +116,11 @@ wss.on("connection", (ws, req) => {
             return;
           }
           if (isStale()) return;
+          if (isNetworkError(err)) {
+            console.log(`[net] voice request failed: ${networkErrorCode(err)}`);
+            sendJson(ws, { type: "error", message: "I'm having trouble connecting. Please try again." });
+            return;
+          }
           console.error("[mouth] failed for sentence:", sentence, err);
           sendJson(ws, { type: "error", message: "The voice failed for part of the reply." });
         }
@@ -156,6 +161,11 @@ wss.on("connection", (ws, req) => {
         return;
       }
       if (isStale()) return;
+      if (isNetworkError(err)) {
+        console.log(`[net] request failed: ${networkErrorCode(err)}`);
+        sendJson(ws, { type: "error", message: "I'm having trouble connecting. Please try again." });
+        return;
+      }
       console.error(err);
       sendJson(ws, { type: "error", message: "Something went wrong. Check the terminal." });
     }

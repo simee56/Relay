@@ -97,3 +97,19 @@ button:disabled {
 .ok {
   color: #0a7a33;
 }
+
+.inline-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.inline-form input {
+  flex: 1;
+}
+
+button.secondary {
+  background: white;
+  color: #2457d6;
+  border: 1px solid #2457d6;
+}

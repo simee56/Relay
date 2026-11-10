@@ -56,4 +56,24 @@ export const updateAgent = (agentId: string, changes: AgentChanges) =>
         method: "PATCH",
         body: JSON.stringify(changes),
     }
+    );
+
+export type NewAgent = {
+    name: string;
+    system_prompt: string;
+    voice?: string;
+};
+
+export const createTenant = (name: string) =>
+    request<Tenant>("/tenants", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+    }
+);
+
+export const createAgent = (tenantId: string, agent: NewAgent) =>
+    request<Agent>(`/tenants/${tenantId}/agents`, {
+        method: "POST",
+        body: JSON.stringify(agent),
+    }
 );

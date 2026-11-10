@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
-import { createTenant, listTenants } from "../models/tenants";
-import { isUniqueViolation } from "../utils";
+import { createTenant, findTenantById, listTenants } from "../models/tenants";
+import { uniqueViolationConstraint, isUuid } from "../utils";
 
 export async function getTenants(_req: Request, res: Response) {
   try {
@@ -9,6 +9,27 @@ export async function getTenants(_req: Request, res: Response) {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not load tenants" });
+  }
+}
+
+export async function getTenant(req: Request, res: Response) {
+  const tenantId = String(req.params.tenantId);
+
+  if (!isUuid(tenantId)) {
+    res.status(400).json({ error: "tenantId is not a valid id" });
+    return;
+  }
+
+  try {
+    const tenant = await findTenantById(tenantId);
+    if (!tenant) {
+      res.status(404).json({ error: "Business not found" });
+      return;
+    }
+    res.json(tenant);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load business" });
   }
 }
 
@@ -24,7 +45,7 @@ export async function addTenant(req: Request, res: Response) {
     const tenant = await createTenant(name);
     res.status(201).json(tenant);
   } catch (err) {
-    if (isUniqueViolation(err)) {
+    if (uniqueViolationConstraint(err)) {
       res.status(409).json({ error: "A business with that name already exists" });
       return;
     }

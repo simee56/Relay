@@ -1,5 +1,6 @@
 import { Router } from "express";
 import tenantRoutes from "./tenants";
+import agentRoutes from "./agents";
 
 const router = Router();
 
@@ -8,5 +9,6 @@ router.get("/health", (_req, res) => {
 });
 
 router.use("/tenants", tenantRoutes);
+router.use("/agents", agentRoutes);
 
 export default router;

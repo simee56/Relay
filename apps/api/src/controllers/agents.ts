@@ -1,16 +1,17 @@
 import type { Request, Response } from "express";
-import { findTenantById } from "../models/tenants";
 import {
     createAgent,
     findAgentById,
     listAgentsByTenant,
     updateAgent,
 } from "../models/agents";
+import { getAuth } from "../middleware/auth";
 import { isUuid } from "../utils";
 
 type AgentFields = { name?: string; systemPrompt?: string; voice?: string };
 type FieldsResult = { ok: true; value: AgentFields } | { ok: false; error: string };
 
+// Checks the agent fields in a request body. A field that was not sent is skipped.
 function readAgentFields(body: unknown): FieldsResult {
     const b = (body ?? {}) as Record<string, unknown>;
     const value: AgentFields = {};
@@ -18,7 +19,7 @@ function readAgentFields(body: unknown): FieldsResult {
     if (b.name !== undefined) {
         const name = typeof b.name === "string" ? b.name.trim() : "";
         if (!name || name.length > 100) {
-        return { ok: false, error: "name must be 1 to 100 characters" };
+            return { ok: false, error: "name must be 1 to 100 characters" };
         }
         value.name = name;
     }
@@ -26,7 +27,7 @@ function readAgentFields(body: unknown): FieldsResult {
     if (b.system_prompt !== undefined) {
         const prompt = typeof b.system_prompt === "string" ? b.system_prompt.trim() : "";
         if (!prompt || prompt.length > 4000) {
-        return { ok: false, error: "system_prompt must be 1 to 4000 characters" };
+            return { ok: false, error: "system_prompt must be 1 to 4000 characters" };
         }
         value.systemPrompt = prompt;
     }
@@ -34,7 +35,7 @@ function readAgentFields(body: unknown): FieldsResult {
     if (b.voice !== undefined) {
         const voice = typeof b.voice === "string" ? b.voice.trim() : "";
         if (!voice || voice.length > 50) {
-        return { ok: false, error: "voice must be 1 to 50 characters" };
+            return { ok: false, error: "voice must be 1 to 50 characters" };
         }
         value.voice = voice;
     }
@@ -42,20 +43,11 @@ function readAgentFields(body: unknown): FieldsResult {
     return { ok: true, value };
 }
 
-export async function listTenantAgents(req: Request, res: Response) {
-    const tenantId = String(req.params.tenantId);
-
-    if (!isUuid(tenantId)) {
-        res.status(400).json({ error: "tenantId is not a valid id" });
-        return;
-    }
+// GET /agents : the agents of the logged-in business
+export async function listMyAgents(_req: Request, res: Response) {
+    const { tenantId } = getAuth(res); // from the signed token, never from the request
 
     try {
-        const tenant = await findTenantById(tenantId);
-        if (!tenant) {
-        res.status(404).json({ error: "Business not found" });
-        return;
-        }
         res.json(await listAgentsByTenant(tenantId));
     } catch (err) {
         console.error(err);
@@ -63,13 +55,9 @@ export async function listTenantAgents(req: Request, res: Response) {
     }
 }
 
-export async function createTenantAgent(req: Request, res: Response) {
-    const tenantId = String(req.params.tenantId);
-
-    if (!isUuid(tenantId)) {
-        res.status(400).json({ error: "tenantId is not a valid id" });
-        return;
-    }
+// POST /agents : creates an agent in the logged-in business
+export async function createMyAgent(req: Request, res: Response) {
+    const { tenantId } = getAuth(res);
 
     const fields = readAgentFields(req.body);
     if (!fields.ok) {
@@ -84,11 +72,6 @@ export async function createTenantAgent(req: Request, res: Response) {
     }
 
     try {
-        const tenant = await findTenantById(tenantId);
-        if (!tenant) {
-        res.status(404).json({ error: "Business not found" });
-        return;
-        }
         const agent = await createAgent(tenantId, name, systemPrompt, voice);
         res.status(201).json(agent);
     } catch (err) {
@@ -97,7 +80,9 @@ export async function createTenantAgent(req: Request, res: Response) {
     }
 }
 
+// GET /agents/:agentId
 export async function getAgent(req: Request, res: Response) {
+    const { tenantId } = getAuth(res);
     const agentId = String(req.params.agentId);
 
     if (!isUuid(agentId)) {
@@ -106,10 +91,10 @@ export async function getAgent(req: Request, res: Response) {
     }
 
     try {
-        const agent = await findAgentById(agentId);
+        const agent = await findAgentById(agentId, tenantId);
         if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
+            res.status(404).json({ error: "Agent not found" });
+            return;
         }
         res.json(agent);
     } catch (err) {
@@ -118,7 +103,9 @@ export async function getAgent(req: Request, res: Response) {
     }
 }
 
+// PATCH /agents/:agentId
 export async function patchAgent(req: Request, res: Response) {
+    const { tenantId } = getAuth(res);
     const agentId = String(req.params.agentId);
 
     if (!isUuid(agentId)) {
@@ -138,7 +125,7 @@ export async function patchAgent(req: Request, res: Response) {
     }
 
     try {
-        const agent = await updateAgent(agentId, fields.value);
+        const agent = await updateAgent(agentId, tenantId, fields.value);
         if (!agent) {
             res.status(404).json({ error: "Agent not found" });
             return;

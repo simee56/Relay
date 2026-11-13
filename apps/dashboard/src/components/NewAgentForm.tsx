@@ -3,23 +3,22 @@ import { createAgent, type Agent } from "../api";
 import { starterPrompt } from "../prompts";
 
 type Props = {
-    tenantId: string;
-    tenantName: string;
+    businessName: string;
     onCreated: (agent: Agent) => void;
 };
 
-export default function NewAgentForm({ tenantId, tenantName, onCreated }: Props) {
+export default function NewAgentForm({ businessName, onCreated }: Props) {
     const [open, setOpen] = useState(false);
     const [name, setName] = useState("Receptionist");
     const [voice, setVoice] = useState("");
-    const [systemPrompt, setSystemPrompt] = useState(starterPrompt(tenantName));
+    const [systemPrompt, setSystemPrompt] = useState(starterPrompt(businessName));
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     function reset() {
         setName("Receptionist");
         setVoice("");
-        setSystemPrompt(starterPrompt(tenantName));
+        setSystemPrompt(starterPrompt(businessName));
         setError(null);
     }
 
@@ -35,7 +34,7 @@ export default function NewAgentForm({ tenantId, tenantName, onCreated }: Props)
         setError(null);
 
         try {
-            const agent = await createAgent(tenantId, {
+            const agent = await createAgent({
                 name: name.trim(),
                 system_prompt: systemPrompt.trim(),
                 voice: voice.trim() || undefined, // empty means "use the default voice"

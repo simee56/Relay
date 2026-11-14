@@ -12,8 +12,11 @@ import { getAuth } from "../middleware/auth";
 import { createAccount, findUserByEmail, findUserById } from "../models/users";
 import { findTenantById } from "../models/tenants";
 import { uniqueViolationConstraint } from "../utils";
+import { clearFailures, isLocked, recordFailure } from "../rateLimit";
 
 const BCRYPT_COST = 12;
+const MAX_FAILED_LOGINS = 5;
+const LOCK_WINDOW_SECONDS = 15 * 60;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", BCRYPT_COST);
@@ -78,12 +81,23 @@ export async function login(req: Request, res: Response) {
         return;
     }
 
+    const throttleKey = `login-fail:${req.ip}:${email.toLowerCase()}`;
+    const retryAfter = await isLocked(throttleKey, MAX_FAILED_LOGINS);
+    if (retryAfter !== null) {
+        res.setHeader("Retry-After", String(retryAfter));
+        const minutes = Math.max(1, Math.ceil(retryAfter / 60));
+        res.status(429).json({
+            error: `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+        });
+        return;
+    }
+
     try {
         const user = await findUserByEmail(email);
-
         const matches = await bcrypt.compare(password, user?.password_hash ?? DUMMY_HASH);
 
         if (!user || !matches) {
+            await recordFailure(throttleKey, LOCK_WINDOW_SECONDS);
             res.status(401).json({ error: "Invalid email or password" });
             return;
         }
@@ -94,6 +108,7 @@ export async function login(req: Request, res: Response) {
             return;
         }
 
+        await clearFailures(throttleKey);
         startSession(res, user.id, tenant.id);
         res.json({
             user: { id: user.id, email: user.email },

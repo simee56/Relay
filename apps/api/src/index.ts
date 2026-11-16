@@ -12,8 +12,8 @@ app.use(
     credentials: true, // lets the browser send the login cookie
   })
 );
-app.use(cookieParser()); 
-app.use(express.json());
+app.use(cookieParser());
+app.use(express.json({ limit: "1mb" }));
 app.use(routes);
 
 const PORT = Number(process.env.PORT ?? 4000);

@@ -18,6 +18,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "undici": "^7.30.2",

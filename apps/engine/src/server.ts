@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto"; // NEW
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -7,7 +8,14 @@ import { askBrainBySentence, type ChatMessage } from "./brain";
 import { speak } from "./mouth";
 import { TurnTrace } from "./trace";
 import { warmUp, isNetworkError, networkErrorCode } from "./http";
-import { getDefaultAgent, getAgentById } from "./db";
+import { getAgentById, getDefaultAgent, type Agent } from "./db";
+import {
+  HEARTBEAT_MS,
+  acquireCallSlot,
+  activeCalls,
+  refreshCallSlot,
+  releaseCallSlot,
+} from "./callLimits";
 
 const PORT = 3000;
 const MAX_HISTORY_MESSAGES = 12;
@@ -43,17 +51,53 @@ wss.on("connection", (ws, req) => {
   const history: ChatMessage[] = [];
   let currentController: AbortController | null = null;
 
+  const callId = randomUUID();
+  let heldTenantId: string | null = null;
+  let heartbeat: NodeJS.Timeout | null = null;
+
   const requestedAgentId = new URL(req.url ?? "/", "http://localhost").searchParams.get("agent");
 
-  const agentPromise = (
-    requestedAgentId ? getAgentById(requestedAgentId) : getDefaultAgent()
-  ).catch((err) => {
-    console.error("[db] could not load the agent:", err);
-    return null;
-  });
-  void agentPromise.then((agent) => {
-    if (agent) console.log(`[agent] loaded "${agent.name}" for ${agent.tenantName}`);
-  });
+
+  const callReady: Promise<Agent | null> = (async () => {
+    let found: Agent | null = null;
+    try {
+      found = requestedAgentId
+        ? await getAgentById(requestedAgentId)
+        : await getDefaultAgent();
+    } catch (err) {
+      console.error("[db] could not load the agent:", err);
+      return null;
+    }
+    if (!found) return null;
+
+    const agent: Agent = found;
+    console.log(`[agent] loaded "${agent.name}" for ${agent.tenantName}`);
+
+    const granted = await acquireCallSlot(agent.tenantId, callId, agent.maxConcurrentCalls);
+    if (!granted) {
+      console.log(
+        `[calls] ${agent.tenantName} is at its limit (${agent.maxConcurrentCalls}), refusing this call`
+      );
+      sendJson(ws, { type: "error", message: "This line is busy. Please try again in a moment." });
+      ws.close();
+      return null;
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      void releaseCallSlot(agent.tenantId, callId);
+      return null;
+    }
+
+    heldTenantId = agent.tenantId;
+    heartbeat = setInterval(() => {
+      void refreshCallSlot(agent.tenantId, callId);
+    }, HEARTBEAT_MS);
+
+    console.log(
+      `[calls] ${agent.tenantName}: ${await activeCalls(agent.tenantId)}/${agent.maxConcurrentCalls} active`
+    );
+    return agent;
+  })();
 
   ws.on("message", async (data, isBinary) => {
     if (!isBinary) {
@@ -77,7 +121,7 @@ wss.on("connection", (ws, req) => {
     currentController = controller;
     const signal = controller.signal;
 
-    const agent = await agentPromise;
+    const agent = await callReady;
     if (!agent) {
       sendJson(ws, { type: "error", message: "No agent is available. Check the database." });
       return;
@@ -88,7 +132,6 @@ wss.on("connection", (ws, req) => {
     let firstAudioSent = false;
     let sendChain: Promise<void> = Promise.resolve();
 
-    // Called once for every complete sentence from the Brain
     function enqueueSentence(sentence: string) {
       if (isStale()) return;
       trace.mark("firstSentence");
@@ -97,7 +140,6 @@ wss.on("connection", (ws, req) => {
       const job = speak(sentence, { voice: agentVoice, signal });
       job.catch(() => { });
 
-      // The chain makes sure clips are SENT in order
       sendChain = sendChain.then(async () => {
         try {
           const audio = await job;
@@ -142,7 +184,6 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // The agent's own instructions go to the Brain, together with the history and the cancel wire
       const reply = await askBrainBySentence(heard, enqueueSentence, {
         systemPrompt: agent.systemPrompt,
         history: [...history],
@@ -173,6 +214,8 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     currentController?.abort();
+    if (heartbeat) clearInterval(heartbeat);
+    if (heldTenantId) void releaseCallSlot(heldTenantId, callId);
     console.log("[ws] client disconnected");
   });
 });

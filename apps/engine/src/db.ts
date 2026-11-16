@@ -13,6 +13,7 @@ export type Agent = {
   id: string;
   tenantId: string;
   tenantName: string;
+  maxConcurrentCalls: number;
   name: string;
   systemPrompt: string;
   voice: string;
@@ -22,13 +23,15 @@ type AgentRow = {
   id: string;
   tenant_id: string;
   tenant_name: string;
+  max_concurrent_calls: number;
   name: string;
   system_prompt: string;
   voice: string;
 };
 
 const AGENT_SELECT = `
-  SELECT a.id, a.tenant_id, t.name AS tenant_name, a.name, a.system_prompt, a.voice
+  SELECT a.id, a.tenant_id, t.name AS tenant_name, t.max_concurrent_calls,
+         a.name, a.system_prompt, a.voice
   FROM agents a
   JOIN tenants t ON t.id = a.tenant_id
 `;
@@ -38,6 +41,7 @@ function toAgent(row: AgentRow): Agent {
     id: row.id,
     tenantId: row.tenant_id,
     tenantName: row.tenant_name,
+    maxConcurrentCalls: row.max_concurrent_calls,
     name: row.name,
     systemPrompt: row.system_prompt,
     voice: row.voice,
@@ -55,7 +59,7 @@ export async function getDefaultAgent(): Promise<Agent | null> {
 }
 
 export async function getAgentById(id: string): Promise<Agent | null> {
-  if (!UUID_PATTERN.test(id)) return null; // not even shaped like an id
+  if (!UUID_PATTERN.test(id)) return null;
   const result = await pool.query<AgentRow>(`${AGENT_SELECT} WHERE a.id = $1`, [id]);
   return result.rows[0] ? toAgent(result.rows[0]) : null;
 }

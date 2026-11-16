@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS agents (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS agents_tenant_id_idx ON agents (tenant_id);
-
 CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -22,3 +21,5 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (lower(email));
 CREATE INDEX IF NOT EXISTS users_tenant_id_idx ON users (tenant_id);
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS max_concurrent_calls integer NOT NULL DEFAULT 3 CHECK (max_concurrent_calls > 0);

@@ -62,3 +62,14 @@ export async function deleteDocument(id: string, tenantId: string): Promise<bool
     );
     return (result.rowCount ?? 0) > 0;
 }
+
+// Puts a failed (or stuck) document back to "queued". Returns false if it was not in a state that allows it.
+export async function markQueued(id: string, tenantId: string): Promise<boolean> {
+    const result = await pool.query(
+        `UPDATE documents
+     SET status = 'queued', error = NULL
+     WHERE id = $1 AND tenant_id = $2 AND status IN ('queued', 'failed')`,
+        [id, tenantId]
+    );
+    return (result.rowCount ?? 0) > 0;
+}

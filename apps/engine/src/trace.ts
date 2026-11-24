@@ -11,7 +11,7 @@ export class TurnTrace {
   private readonly t0 = Date.now();
   private marks: Record<string, number> = {};
 
-  constructor(private readonly turn: number) {}
+  constructor(private readonly turn: number) { }
 
   mark(name: string): void {
     if (this.marks[name] === undefined) {
@@ -20,17 +20,18 @@ export class TurnTrace {
   }
 
   finish(): void {
-    const { earDone, firstSentence, firstAudioSent } = this.marks;
+    const { earDone, retrievalDone, firstSentence, firstAudioSent } = this.marks;
     if (earDone === undefined || firstSentence === undefined || firstAudioSent === undefined) {
       return;
     }
 
     const ear = earDone;
-    const brain = firstSentence - earDone;
+    const rag = retrievalDone !== undefined ? retrievalDone - earDone : 0;
+    const brain = firstSentence - (retrievalDone ?? earDone);
     const mouth = firstAudioSent - firstSentence;
 
     console.log(
-      `[turn ${this.turn}] first audio ${firstAudioSent} ms (ear ${ear}, brain ${brain}, mouth ${mouth})`
+      `[turn ${this.turn}] first audio ${firstAudioSent} ms (ear ${ear}, rag ${rag}, brain ${brain}, mouth ${mouth})`
     );
 
     recentTotals.push(firstAudioSent);

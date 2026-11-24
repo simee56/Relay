@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomUUID } from "node:crypto"; 
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -9,6 +9,8 @@ import { speak } from "./mouth";
 import { TurnTrace } from "./trace";
 import { warmUp, isNetworkError, networkErrorCode } from "./http";
 import { getAgentById, getDefaultAgent, type Agent } from "./db";
+import { RAG_ENABLED, buildSystemPrompt, findKnowledge, searchTextFor } from "./knowledge";
+import { getEmbedder } from "./embedder";
 import {
   HEARTBEAT_MS,
   acquireCallSlot,
@@ -39,6 +41,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 const wss = new WebSocketServer({ server });
+
+if (RAG_ENABLED) {
+  getEmbedder().catch((err) => console.error("[embedder] could not load the model:", err.message));
+}
 
 function sendJson(ws: WebSocket, payload: object) {
   ws.send(JSON.stringify(payload));
@@ -184,11 +190,32 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
+      let systemPrompt = agent.systemPrompt;
+      if (RAG_ENABLED) {
+        try {
+          const ragStart = Date.now();
+          const searchText = searchTextFor(heard, history);
+          const knowledge = await findKnowledge(agent.tenantId, searchText);
+          console.log(
+            `[rag] "${searchText}" -> ${knowledge.length} chunk(s) in ${Date.now() - ragStart} ms` +
+            (knowledge.length
+              ? `, best ${knowledge[0].score.toFixed(2)}: "${knowledge[0].content.slice(0, 50)}..."`
+              : "")
+          );
+          systemPrompt = buildSystemPrompt(agent.systemPrompt, knowledge);
+        } catch (err) {
+          console.error("[rag] lookup failed, answering without it:", (err as Error).message);
+        }
+        if (isStale()) return;
+      }
+      trace.mark("retrievalDone");
+
       const reply = await askBrainBySentence(heard, enqueueSentence, {
-        systemPrompt: agent.systemPrompt,
+        systemPrompt,
         history: [...history],
         signal,
       });
+
       if (isStale()) return;
       sendJson(ws, { type: "reply", text: reply });
 

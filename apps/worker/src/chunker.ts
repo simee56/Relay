@@ -3,8 +3,8 @@ export type ChunkOptions = {
     overlapChars?: number;
 };
 
-const DEFAULT_MAX_CHARS = 700;
-const DEFAULT_OVERLAP_CHARS = 120;
+const DEFAULT_MAX_CHARS = 250;
+const DEFAULT_OVERLAP_CHARS = 50;
 
 function splitLongText(text: string, maxChars: number): string[] {
     const sentences = text.split(/(?<=[.!?])\s+/);

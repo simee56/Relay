@@ -35,7 +35,7 @@ export type SignUpInput = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
-    credentials: "include", 
+    credentials: "include",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
 
@@ -70,3 +70,30 @@ export const createAgent = (agent: NewAgent) =>
 
 export const updateAgent = (agentId: string, changes: AgentChanges) =>
   request<Agent>(`/agents/${agentId}`, { method: "PATCH", body: JSON.stringify(changes) });
+
+// --- Knowledge (documents) ---
+export type DocumentStatus = "queued" | "processing" | "ready" | "failed";
+
+export type DocumentItem = {
+  id: string;
+  title: string;
+  status: DocumentStatus;
+  error: string | null;
+  created_at: string;
+  char_count: number;
+  chunk_count: number;
+};
+
+export const getDocuments = () => request<DocumentItem[]>("/documents");
+
+export const createDocument = (title: string, content: string) =>
+  request<DocumentItem>("/documents", {
+    method: "POST",
+    body: JSON.stringify({ title, content }),
+  });
+
+export const retryDocument = (documentId: string) =>
+  request<{ ok: boolean }>(`/documents/${documentId}/retry`, { method: "POST" });
+
+export const deleteDocument = (documentId: string) =>
+  request<{ ok: boolean }>(`/documents/${documentId}`, { method: "DELETE" });

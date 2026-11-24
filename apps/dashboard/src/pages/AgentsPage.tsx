@@ -5,7 +5,7 @@ import AgentEditor from "../components/AgentEditor";
 import NewAgentForm from "../components/NewAgentForm";
 
 export default function AgentsPage() {
-    const { me, signOut } = useAuth();
+    const { me } = useAuth();
     const [agents, setAgents] = useState<Agent[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -25,21 +25,11 @@ export default function AgentsPage() {
         setAgents((current) => [...current, created]);
     }
 
-    if (!me) return null; // RequireAuth makes sure this never happens
+    if (!me) return null; 
 
     return (
         <div>
-            <div className="row">
-                <div>
-                    <h2 style={{ margin: 0 }}>{me.tenant.name}</h2>
-                    <span className="muted">{me.user.email}</span>
-                </div>
-                <button className="secondary" onClick={() => void signOut()}>
-                    Log out
-                </button>
-            </div>
-
-            <p className="muted">Agents</p>
+            <h2>Agents</h2>
 
             {loading && <p>Loading...</p>}
             {error && <p className="error">Could not load agents: {error}</p>}
